@@ -1,0 +1,153 @@
+{
+  "name": "reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0df19043-a767-49ad-acb9-0a2ad05f1e31",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE schedule\nSET is_notified = TRUE\nWHERE id IN (\n    SELECT id \n    FROM schedule\n    WHERE event_date = (NOW() AT TIME ZONE 'Europe/Moscow')::DATE\n      AND is_important = TRUE\n      AND is_notified = FALSE\n      AND is_completed = FALSE\n      AND time_start IS NOT NULL\n      AND time_start BETWEEN \n          ((NOW() AT TIME ZONE 'Europe/Moscow')::TIME + INTERVAL '15 minutes') \n          AND \n          ((NOW() AT TIME ZONE 'Europe/Moscow')::TIME + INTERVAL '60 minutes')\n)\nRETURNING id, user_id, title, time_start, description;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "f9d73dc3-8f6d-472a-a73d-566429eb5352",
+      "name": "get_and_mark_reminders",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "2df9ec13-e377-4199-a78f-d610c932cd98",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        448,
+        0
+      ],
+      "id": "dfeca904-85ca-4f6b-a9de-2790ab3a6f62",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.user_id }}",
+        "text": "=🔥 *Скоро важное событие!* 🕒 Начало в *{{ $json.time_start.slice(0, 5) }}* 📌 *{{ $json.title }}* {{ $json.description ? '\\n📝 ' + $json.description : '' }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "41faaee3-f96d-4c40-9ed9-96d491f74110",
+      "name": "Send a text message",
+      "webhookId": "689f60e3-c057-4237-ba3c-819384aa331a",
+      "credentials": {
+        "telegramApi": {
+          "id": "7CyWke4TbdJyxcQm",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "get_and_mark_reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_and_mark_reminders": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f26d743c-c1b0-41cd-9a77-2986c587384f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c8ddc6f1a9e600f29aea545a450e49fc53187a21f6c55612ca9983426a7b9838"
+  },
+  "nodeGroups": [],
+  "id": "rp3WES88LLiRo3uQ",
+  "tags": []
+}

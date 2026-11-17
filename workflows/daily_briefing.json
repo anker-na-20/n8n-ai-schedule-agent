@@ -1,0 +1,285 @@
+{
+  "name": "daily_briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        272,
+        352
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 22
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        272,
+        544
+      ],
+      "id": "b041a58d-cfa2-4c79-956a-754f89516a40",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.payload.chat_id }}",
+        "text": "={{ $json.payload.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ $json.payload.reply_markup.inline_keyboard[0][0].text }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.payload.reply_markup.inline_keyboard[0][0].callback_data }}"
+                    }
+                  },
+                  {
+                    "text": "={{ $json.payload.reply_markup.inline_keyboard[0][1].text }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.payload.reply_markup.inline_keyboard[0][1].callback_data }}"
+                    }
+                  },
+                  {
+                    "text": "={{ $json.payload.reply_markup.inline_keyboard[0][2].text }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.payload.reply_markup.inline_keyboard[0][2].callback_data }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1424,
+        272
+      ],
+      "id": "ee83c7ac-64c2-46ec-9a03-23eacdc56a29",
+      "name": "Send a text message",
+      "webhookId": "ebadc601-5721-4aad-a156-d517e7d2666f",
+      "credentials": {
+        "telegramApi": {
+          "id": "7CyWke4TbdJyxcQm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Если пришел клик по кнопке — обновляем статус текущей задачи и режим сессии\nWITH btn_task AS (\n    UPDATE schedule\n    SET \n        is_completed = CASE WHEN '{{ $json.action }}' = 'done' THEN TRUE ELSE is_completed END,\n        is_reviewed_today = CASE WHEN '{{ $json.action }}' IN ('done', 'skip') THEN TRUE ELSE is_reviewed_today END\n    WHERE '{{ $json.source }}' = 'button_click'\n      AND id = {{ $json.task_id || 0 }}\n      AND user_id = {{ $json.chat_id || 0 }}\n    RETURNING title\n),\nbtn_session AS (\n    UPDATE user_session\n    SET \n        current_mode = CASE WHEN '{{ $json.action }}' = 'move' THEN 2 ELSE 1 END,\n        pending_task_id = CASE WHEN '{{ $json.action }}' = 'move' THEN {{ $json.task_id || 0 }} ELSE NULL END\n    WHERE '{{ $json.source }}' = 'button_click'\n      AND user_id = {{ $json.chat_id || 0 }}\n),\n-- 2. Ищем следующую неразобранную задачу (для конкретного юзера или для всех при Cron)\nnext_tasks AS (\n    SELECT \n        id, user_id, title, time_start, is_important,\n        ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY time_start ASC NULLS LAST, id ASC) AS rn,\n        COUNT(*) OVER (PARTITION BY user_id) AS total_left\n    FROM schedule\n    WHERE event_date = (NOW() AT TIME ZONE 'Europe/Moscow')::DATE\n      AND item_type = 'task'\n      AND is_completed = FALSE\n      AND is_reviewed_today = FALSE\n      AND id != {{ $json.task_id || 0 }}\n      AND (\n          '{{ $json.source }}' = 'cron_start' \n          OR user_id = {{ $json.chat_id || 0 }}\n      )\n)\n-- 3. Собираем финальный ответ для рендера карточки\nSELECT \n    '{{ $json.source }}' AS source,\n    '{{ $json.action }}' AS btn_action,\n    '{{ $json.callback_query_id }}' AS callback_query_id,\n    {{ $json.message_id || 'NULL' }} AS message_id,\n    COALESCE(nt.user_id, {{ $json.chat_id || 'NULL' }}) AS chat_id,\n    (SELECT title FROM btn_task) AS acted_title,\n    nt.id AS next_id,\n    nt.title AS next_title,\n    nt.time_start AS next_time,\n    nt.is_important AS next_important,\n    nt.total_left\nFROM (SELECT 1) dummy\nLEFT JOIN next_tasks nt ON nt.rn = 1\nWHERE nt.id IS NOT NULL OR '{{ $json.source }}' != 'cron_start';\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        736,
+        448
+      ],
+      "id": "7196a085-4092-483c-a21d-fa4f9ae86111",
+      "name": "get_first_unreviewed_task",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Настройка: Run Once for All Items\nconst input = $input.item.json;\n\n// Вариант 1: Пришел клик по кнопке (проброшенный из главного воркфлоу)\nif (input.callback_query) {\n    const cb = input.callback_query;\n    const parts = cb.data.split('_'); // ['wiz', 'skip', '29']\n    return [{\n        json: {\n            source: 'button_click',\n            callback_query_id: cb.id,\n            chat_id: cb.message.chat.id,\n            message_id: cb.message.message_id,\n            action: parts[1], // <-- ОБЯЗАТЕЛЬНО [1]\n            task_id: Number(parts[2]) // <-- ОБЯЗАТЕЛЬНО [2]\n        }\n    }];\n}\n\n\n// Вариант 2: Пришел сигнал продолжить опрос после переноса задачи в ИИ\nif (input.action === 'resume_wizard') {\n    return [{\n        json: {\n            source: 'resume_after_move',\n            chat_id: input.chat_id\n        }\n    }];\n}\n\n// Вариант 3: Плановый запуск по Cron в 21:00 (убираем старые галочки is_reviewed_today перед стартом)\nreturn [{\n    json: {\n        source: 'cron_start'\n    }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        448
+      ],
+      "id": "570467ec-cb7b-478d-9096-8dcca0046c17",
+      "name": "route_wizard_event"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nif (!items.length || !items[0].json.chat_id) return [];\n\nconst results = [];\n\nfor (const item of items) {\n    const d = item.json;\n    \n    const isEdit = d.source === 'button_click' && d.message_id;\n    const tgMethod = isEdit ? 'editMessageText' : 'sendMessage';\n    \n    let text = '';\n    let replyMarkup = { inline_keyboard: [] };\n\n    if (d.btn_action === 'move') {\n        text = `➡️ *Перенос задачи:* «${d.acted_title}»\\n\\n✍️ Напиши текстом или надиктуй голосом, на какую дату и время её перенести? *(Например: «на четверг в 16:00» или «на завтра»)*`;\n    } else if (d.next_id) {\n        const mark = d.next_important ? '🔥 ' : '';\n        const timeStr = d.next_time ? `\\n🕒 Запланировано на: *${String(d.next_time).slice(0, 5)}*` : '';\n        \n        text = `🌙 *Вечерний чек-ин* (осталось задач: ${d.total_left})\\n\\n` +\n               `📌 ${mark}*${d.next_title}*${timeStr}\\n\\n` +\n               `Успел выполнить эту задачу сегодня?`;\n               \n        replyMarkup = {\n            inline_keyboard: [\n                [\n                    { text: '✅ Да', callback_data: `wiz_done_${d.next_id}` },\n                    { text: '❌ Нет', callback_data: `wiz_skip_${d.next_id}` },\n                    { text: '➡️ Перенос', callback_data: `wiz_move_${d.next_id}` }\n                ]\n            ]\n        };\n    } else {\n        text = `🎉 *Отличная работа!* Все задачи на сегодня разобраны. Хорошего вечера!`;\n    }\n\n    const payload = {\n        chat_id: Number(d.chat_id),\n        text: text,\n        parse_mode: 'Markdown',\n        reply_markup: replyMarkup\n    };\n\n    if (isEdit) {\n        payload.message_id = Number(d.message_id);\n    }\n\n    results.push({\n        json: {\n            tg_method: tgMethod,\n            callback_query_id: d.callback_query_id || null,\n            payload: payload\n        }\n    });\n}\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        448
+      ],
+      "id": "5212c396-0536-49fd-acc7-36391daaf68b",
+      "name": "render_a_card"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "674a4e24-c407-4413-a713-f459a742533f",
+              "leftValue": "={{ $json.payload.reply_markup.inline_keyboard }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1184,
+        448
+      ],
+      "id": "6ffdb57b-8fa0-49a4-bdda-ba978476c0b4",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.payload.chat_id }}",
+        "text": "={{ $json.payload.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1424,
+        544
+      ],
+      "id": "e93f4173-ef0a-460d-9092-4c38b552314f",
+      "name": "Send a text message1",
+      "webhookId": "95ddbc16-7a05-4b6c-8459-5c7dfe5805fb",
+      "credentials": {
+        "telegramApi": {
+          "id": "7CyWke4TbdJyxcQm",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "route_wizard_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "route_wizard_event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_first_unreviewed_task": {
+      "main": [
+        [
+          {
+            "node": "render_a_card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "route_wizard_event": {
+      "main": [
+        [
+          {
+            "node": "get_first_unreviewed_task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "render_a_card": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b273c81a-c7cf-49ae-9538-4c5b27a61269",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c8ddc6f1a9e600f29aea545a450e49fc53187a21f6c55612ca9983426a7b9838"
+  },
+  "nodeGroups": [],
+  "id": "6RP0X2qNyFcVKkJ9",
+  "tags": []
+}

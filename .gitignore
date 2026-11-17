@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.python-version
+
+# Data folders
+/postgres_data
+/n8n_storage
+
+# Virtual environments
+.venv
+uv.lock
+
+# Password files
+.env
+

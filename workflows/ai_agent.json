@@ -1,0 +1,2171 @@
+{
+  "name": "ai_agent",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -512,
+        -16
+      ],
+      "id": "277f9172-0bd3-443f-bca9-3b53302abc15",
+      "name": "Telegram Trigger",
+      "webhookId": "b53b8f28-5035-4ae4-94c3-8bbf2db4e10c",
+      "credentials": {
+        "telegramApi": {
+          "id": "7CyWke4TbdJyxcQm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/transcribe",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        848,
+        -144
+      ],
+      "id": "1c5df002-4f89-4024-9110-e258eff7b642",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.message.voice.file_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -144
+      ],
+      "id": "1da44bf3-3b21-4f2a-86ac-e3fe124fd4b0",
+      "name": "Get a file",
+      "webhookId": "8154929a-e432-4d3e-83cd-9a21c9ab8199",
+      "credentials": {
+        "telegramApi": {
+          "id": "7CyWke4TbdJyxcQm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Ты — интеллектуальный ИИ-ассистент и менеджер расписания. Твоя цель — помогать пользователю управлять задачами, учебным расписанием и целями на основе переданного контекста и инструкции от модуля предобработки.\n\nТЕКУЩЕЕ ВРЕМЯ:\nДата: {{ new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Moscow' }) }} ({{ new Date().toLocaleDateString('ru-RU', { weekday: 'long', timeZone: 'Europe/Moscow' }) }})\nТекущая ISO-неделя: {{ (() => { const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' })); d.setHours(0,0,0,0); d.setDate(d.getDate() + 4 - (d.getDay() || 7)); const yearStart = new Date(d.getFullYear(),0,1); const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1)/7); return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`; })() }}\n\nКОНТЕКСТ ИЗ БД (задачи, регулярная сетка и цели):\n{{ JSON.stringify($('get_info').all().map(el => el.json)) }}\n\nЗАПРОС ПОЛЬЗОВАТЕЛЯ: {{ $('command').item.json.message.text }}\nИНСТРУКЦИЯ ОТ РОУТЕРА: {{ $('AI_filter').item.json.output }}\n\nПРАВИЛА ОТВЕТА:\n1. Если запрос не требует изменений в БД (просмотр расписания, вопросы, общение) — отвечай дружелюбным текстом БЕЗ JSON.\n2. Если для создания задачи/пары логически нужно время начала, но оно не указано — НЕ генерируй JSON, вежливо уточни время у пользователя.\n3. Если нужно создать, изменить, заменить или удалить запись — сначала напиши краткий ответ пользователю, а в самом конце добавь строго валидный JSON-блок без комментариев, обернутый в теги ```json ... ```. Не пиши фразы вроде «Вот JSON».\n\nСПЕЦИФИКАЦИЯ ЭКШЕНОВ (выбирай строго один формат для блока ```json):\n\n• Создание разового события (schedule):\n{\"action\": \"create_schedule\", \"item_type\": \"university\"|\"task\"|\"note\", \"title\": \"str\", \"description\": \"str\"|null, \"event_date\": \"YYYY-MM-DD\", \"time_start\": \"HH:MM\"|null, \"time_end\": \"HH:MM\"|null, \"is_important\": bool}\n\n• Создание регулярного события (каждую неделю):\n{\"action\": \"create_regular\", \"day_of_week\": 1..7, \"time_start\": \"HH:MM\", \"time_end\": \"HH:MM\"|null, \"item_type\": \"university\"|\"task\", \"title\": \"str\", \"description\": \"str\"|null}\n\n• Редактирование разовой задачи (в patch_data передавай ТОЛЬКО измененные поля; для сброса time_end передай \"clear\"):\n{\"action\": \"update_schedule\", \"id\": int, \"patch_data\": {\"title\": \"str\", \"time_start\": \"HH:MM\", \"time_end\": \"HH:MM\"|\"clear\", \"description\": \"str\", \"is_important\": bool}}\n\n• Редактирование регулярного события (в patch_data передавай ТОЛЬКО измененные поля; не путай с разовым!):\n{\"action\": \"update_regular\", \"id\": int, \"patch_data\": {\"day_of_week\": 1..7, \"time_start\": \"HH:MM\", \"time_end\": \"HH:MM\"|\"clear\", \"item_type\": \"university\"|\"task\"|\"note\", \"title\": \"str\", \"description\": \"str\"}}\n\n• Замена или отмена регулярного события на ОДИН конкретный день:\n{\"action\": \"replace_regular_for_day\", \"delete_id\": int, \"target_date\": \"YYYY-MM-DD\", \"create_data\": {\"item_type\": \"task\"|\"note\", \"title\": \"str\", \"description\": \"str\", \"time_start\": \"HH:MM\"|null, \"time_end\": \"HH:MM\"|null}}\n\n• Удаление разовой задачи:\n{\"action\": \"delete_schedule\", \"id\": int}\n\n• Создание цели (period_value строго: \"YYYY\" для year, \"YYYY-MM\" для month, \"YYYY-Wnn\" для week):\n{\"action\": \"create_goal\", \"period_type\": \"year\"|\"month\"|\"week\", \"period_value\": \"str\", \"text_content\": \"str\"}\n",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2640,
+        16
+      ],
+      "id": "1dbb1d96-f1be-4583-ba60-98216a439837",
+      "name": "AI Agent",
+      "executeOnce": true,
+      "notes": "ДОБАВИТЬ КОНТЕКСТ"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO schedule (\n    user_id, \n    event_date, \n    time_start, \n    time_end, \n    item_type, \n    title, \n    description, \n    is_important\n)\nVALUES (\n    {{ $('Telegram Trigger').item.json.message.chat.id }},\n    '{{ $('Code').item.json.action_data.event_date }}',\n    {{ $('Code').item.json.action_data.time_start ? \"'\" + $('Code').item.json.action_data.time_start + \"'\" : 'NULL' }},\n    {{ $('Code').item.json.action_data.time_end ? \"'\" + $('Code').item.json.action_data.time_end + \"'\" : 'NULL' }},\n    '{{ $('Code').item.json.action_data.item_type }}',\n    '{{ $('Code').item.json.action_data.title }}',\n    {{ $('Code').item.json.action_data.description ? \"'\" + $('Code').item.json.action_data.description + \"'\" : 'NULL' }},\n  '{{ $('Code').item.json.action_data.is_important }}'\n\n);\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        352
+      ],
+      "id": "76fc274c-bb33-4ef8-a52e-ccd3549fd31c",
+      "name": "Create_schedule",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO goals (\n    user_id, \n    period_type, \n    period_value, \n    text_content\n)\nVALUES (\n    {{ $('Telegram Trigger').item.json.message.chat.id }},\n    '{{ $('Code').item.json.action_data.period_type }}',\n    '{{ $('Code').item.json.action_data.period_value }}',\n    '{{ $('Code').item.json.action_data.text_content }}'\n);\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        528
+      ],
+      "id": "bf7ad75e-1cd7-4243-9427-4eeec0ee5c72",
+      "name": "Create_goals",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3792,
+        0
+      ],
+      "id": "ac006b4c-2ae9-427d-a1ae-613cbafda1ad",
+      "name": "Send a text message",
+      "webhookId": "e5883f92-9c77-4683-887d-d7f2dae28b45",
+      "credentials": {
+        "telegramApi": {
+          "id": "7CyWke4TbdJyxcQm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    s.id,\n    s.time_start, \n    s.time_end, \n    s.item_type, \n    s.title, \n    s.description,\n    s.is_important, \n    'разовое' AS kind\nFROM schedule s\nWHERE s.user_id = {{ $('Telegram Trigger').item.json.message.chat.id }} \n  AND s.event_date = CURRENT_DATE\n\nUNION ALL\n\nSELECT \n    r.id,\n    r.time_start, \n    r.time_end, \n    r.item_type, \n    r.title, \n    r.description,\n    FALSE AS is_important, \n    'постоянное' AS kind\nFROM regular_schedule r\nWHERE r.user_id = {{ $('Telegram Trigger').item.json.message.chat.id }} \n  AND r.day_of_week = EXTRACT(ISODOW FROM CURRENT_DATE)\n  AND NOT EXISTS (\n      SELECT 1 \n      FROM schedule s \n      WHERE s.user_id = r.user_id \n        AND s.event_date = CURRENT_DATE\n        AND s.description LIKE CONCAT('%[skip_regular_id:', r.id, ']%')\n  )\n\nORDER BY time_start ASC NULLS LAST;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1328,
+        320
+      ],
+      "id": "ee4a68c7-4045-40dc-9bb2-8aab6f981b34",
+      "name": "get_today",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Настройка режима ноды Code: \"Run Once for All Items\"\n\nconst items = $input.all();\n\n// Форматируем красивую сегодняшнюю дату\nconst todayStr = new Date().toLocaleDateString('ru-RU', { \n    day: 'numeric', \n    month: 'long', \n    weekday: 'long',\n    timeZone: 'Europe/Moscow' \n});\n\n// Если на сегодня ничего нет\nif (!items.length || Object.keys(items[0].json).length === 0) {\n    return [{\n        json: {\n            text: `📅 *Расписание на сегодня (${todayStr})*\\n\\nНа сегодня задач и пар нет. Можно спокойно отдохнуть или заняться своими проектами!`\n        }\n    }];\n}\n\n// Хелпер для обрезки секунд (10:15:00 -> 10:15)\nconst formatTime = (t) => t ? String(t).slice(0, 5) : null;\n\n// Маппинг иконок по типу события\nconst typeIcons = {\n    university: '🎓',\n    task: '📌',\n    note: '📝'\n};\n\nlet lines = [`📅 *Расписание на сегодня (${todayStr}):*\\n`];\n\nfor (const item of items) {\n    const ev = item.json;\n    \n    // Собираем временной интервал\n    const start = formatTime(ev.time_start);\n    const end = formatTime(ev.time_end);\n    let timeBlock = '🕒 *Весь день*';\n    if (start && end) {\n        timeBlock = `🕒 *${start} – ${end}*`;\n    } else if (start) {\n        timeBlock = `🕒 *${start}*`;\n    }\n\n    // Иконка и пометка важности\n    const icon = ev.is_important ? '🔥' : (typeIcons[ev.item_type] || '•');\n    \n    // Очищаем описание от технического маркера [skip_regular_id: X] перед показом юзеру\n    let cleanDesc = '';\n    if (ev.description) {\n        const stripped = ev.description.replace(/\\[skip_regular_id:\\s*\\d+\\]/g, '').trim();\n        if (stripped) {\n            cleanDesc = `\\n   _${stripped}_`;\n        }\n    }\n\n    lines.push(`${timeBlock} | ${icon} ${ev.title}${cleanDesc}`);\n}\n\nreturn [{\n    json: {\n        text: lines.join('\\n')\n    }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        320
+      ],
+      "id": "dd1f3bf9-3327-4f75-bebd-6eb80cf971cb",
+      "name": "format_today"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    s.event_date, \n    s.time_start, \n    s.time_end, -- Добавили время окончания для разовых событий\n    s.item_type, \n    s.title, \n    s.is_important, \n    'разовое' AS kind\nFROM schedule s\nWHERE s.user_id = {{ $('Telegram Trigger').item.json.message.chat.id }} \n  AND s.event_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'\n\nUNION ALL\n\nSELECT \n    d.generated_date::DATE as event_date, r.time_start, r.time_end, r.item_type, r.title, FALSE as is_important, 'постоянное' as kind\nFROM regular_schedule r\nCROSS JOIN LATERAL (\n    SELECT CURRENT_DATE + i as generated_date\n    FROM generate_series(0, 7) i\n) d\nWHERE r.user_id = {{ $('Telegram Trigger').item.json.message.chat.id }} \n  AND r.day_of_week = EXTRACT(ISODOW FROM d.generated_date)\n  \n  -- КРИТИЧЕСКИЙ ФИЛЬТР: Исключаем регулярное событие, если на этот день создана замена\n  AND NOT EXISTS (\n      SELECT 1 \n      FROM schedule s \n      WHERE s.user_id = r.user_id \n        AND s.event_date = d.generated_date::DATE\n        AND s.description LIKE CONCAT('%[skip_regular_id:', r.id, ']%')\n  )\n\nORDER BY event_date ASC, time_start ASC NULLS LAST;\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1328,
+        480
+      ],
+      "id": "35b6540f-a59e-4ccf-a24b-2fe2daeaef7a",
+      "name": "get_week",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT period_type, text_content\nFROM goals \nWHERE user_id = {{ $('Telegram Trigger').item.json.message.chat.id }}\nORDER BY CASE period_type WHEN 'week' THEN 1 WHEN 'month' THEN 2 WHEN 'year' THEN 3 END;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1328,
+        656
+      ],
+      "id": "41e6c716-2886-4aef-900b-4cd92d74e282",
+      "name": "get_goals",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst userId = $('Telegram Trigger').item.json.message.chat.id;\n\nif (items.length === 0 || !items[0].json.title) {\n  return { json: { text: \"📅 *Планы на неделю:*\\n\\nБлижайшие 7 дней абсолютно свободны! 🎉\", chat_id: userId } };\n}\n\nlet report = \"📅 *Ваши планы на ближайшие 7 дней:*\\n\\n\";\nlet currentGroupDate = \"\";\n\nfor (const item of items) {\n  const row = item.json;\n  const dateObj = new Date(row.event_date);\n  const formattedDate = dateObj.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'short' });\n\n  if (formattedDate !== currentGroupDate) {\n    currentGroupDate = formattedDate;\n    report += `\\n🔹 *${currentGroupDate.toUpperCase()}:*\\n`;\n  }\n\n  let emoji = \"📌\";\n  if (row.item_type === 'university') emoji = \"🎓\";\n  if (row.item_type === 'task') emoji = \"✅\";\n  \n  const timeStr = row.time_start ? `\\`${row.time_start.substring(0, 5)} - ${row.time_end.substring(0, 5)}\\` ` : \"\";\n  const impStr = row.is_important ? \"🔥 \" : \"\";\n  \n  report += `  ${emoji} ${timeStr}${impStr}${row.title}\\n`;\n}\n\nreturn { json: { text: report.trim(), chat_id: userId, is_ai: false} };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        480
+      ],
+      "id": "d00150d7-ec77-4b1e-a6f8-7054cb6c56d8",
+      "name": "format_week"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst userId = $('Telegram Trigger').item.json.message.chat.id;\n\nif (items.length === 0 || !items[0].json.text_content) {\n  return { json: { text: \"🎯 *Глобальные цели:*\\n\\nУ вас пока нет активных целей. Время поставить новые! 🚀\", chat_id: userId } };\n}\n\nlet report = \"🎯 *Ваши глобальные цели:*\\n\\n\";\nlet groups = { week: [], month: [], year: [] };\n\nfor (const item of items) {\n  const row = item.json;\n  if (groups[row.period_type]) {\n    groups[row.period_type].push(row.text_content);\n  }\n}\n\nif (groups.week.length > 0) {\n  report += \"▪️ *На эту неделю:*\\n\" + groups.week.map(t => `  • ${t}`).join(\"\\n\") + \"\\n\\n\";\n}\nif (groups.month.length > 0) {\n  report += \"▪️ *На этот месяц:*\\n\" + groups.month.map(t => `  • ${t}`).join(\"\\n\") + \"\\n\\n\";\n}\nif (groups.year.length > 0) {\n  report += \"▪️ *На этот год:*\\n\" + groups.year.map(t => `  • ${t}`).join(\"\\n\") + \"\\n\\n\";\n}\n\nreturn { json: { text: report.trim(), chat_id: userId, is_ai: false } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        656
+      ],
+      "id": "7ec31424-82a9-4dcc-9fb5-7aa91d81fcdf",
+      "name": "format_goals"
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.has_action }}"
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        3184,
+        16
+      ],
+      "id": "2456cddc-530b-47ac-85ba-8afe8e3ba6e0",
+      "name": "action_or_text"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "create_schedule",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "05ea0cb8-729f-452c-8ecb-c0e9b3951d15"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create_schedule"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "439f8fec-2698-4600-9f9f-297fb4cfd0bb",
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "create_goal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create_goal"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "9f13ba18-2020-468f-8a9c-c17d6e2d8855",
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "update_schedule",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "update_schedule"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "5430382d-dca9-4908-b9f4-e867d2e73cb0",
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "create_regular",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create_regular"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "526a64a2-65e9-4e11-a368-7108be9038ed",
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "update_regular",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "update_regular"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "707eb760-d3fa-414a-b499-1cf0f1bca706",
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "replace_regular_for_day",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "replace_regular_for_day"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "ce1e3c39-695f-4007-9958-f2eba2486843",
+                    "leftValue": "={{ $json.action_data.action }}",
+                    "rightValue": "delete_schedule",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "delete_schedule"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        2960,
+        784
+      ],
+      "id": "0ccfc4a8-f239-452c-8101-17bdefdce7ea",
+      "name": "action_type"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "ai_chat_history",
+          "mode": "list",
+          "cachedResultName": "ai_chat_history"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_id": "={{ $json.user_id }}",
+            "role": "={{ $json.role }}",
+            "content": "={{ $json.content }}",
+            "mode_context": "={{ $json.mode_context }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "user_id",
+              "displayName": "user_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "role",
+              "displayName": "role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "content",
+              "displayName": "content",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "mode_context",
+              "displayName": "mode_context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4176,
+        0
+      ],
+      "id": "06f023a2-a4b7-4d40-b710-c3435f0fa1d3",
+      "name": "log_history",
+      "executeOnce": false,
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH upserted AS (\n    INSERT INTO user_session (user_id, current_mode, updated_at)\n    VALUES (\n        {{ $('Telegram Trigger').item.json.message.chat.id }}, \n        1, \n        CURRENT_TIMESTAMP\n    )\n    ON CONFLICT (user_id) \n    DO UPDATE SET updated_at = CURRENT_TIMESTAMP\n    RETURNING current_mode, user_id, pending_task_id\n),\ntask_lookup AS (\n    SELECT \n        u.current_mode,\n        u.user_id,\n        -- Берем ID задачи из сессии, а если он пустой — достаем последнюю непроверенную задачу за сегодня\n        COALESCE(\n            u.pending_task_id,\n            (\n                SELECT id \n                FROM schedule \n                WHERE user_id = u.user_id \n                  AND event_date = (NOW() AT TIME ZONE 'Europe/Moscow')::DATE\n                  AND item_type = 'task'\n                  AND is_completed = FALSE\n                  AND is_reviewed_today = FALSE\n                ORDER BY time_start DESC NULLS LAST, id DESC\n                LIMIT 1\n            )\n        ) AS target_task_id,\n        '{{ ($('Switch').item.json.message.text || $('HTTP Request').item.json.text || '').replace(/'/g, \"''\") }}' AS clean_input\n    FROM upserted u\n)\nSELECT \n    current_mode,\n    user_id,\n    (current_mode = 2 AND target_task_id IS NOT NULL) AS is_move_mode,\n    target_task_id AS moved_task_id,\n    CASE \n        WHEN current_mode = 2 AND target_task_id IS NOT NULL THEN \n            CONCAT(\n                '[СИСТЕМНЫЙ КОНТЕКСТ: Пользователь отвечает на запрос переноса задачи с ID ', \n                target_task_id, \n                ' из вечернего опроса. Обязательно обнови дату/время именно для задачи ID ', \n                target_task_id, \n                ' через update_schedule]. Ответ пользователя: ', \n                clean_input\n            )\n        ELSE clean_input\n    END AS user_raw_text\nFROM task_lookup;\n\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        16
+      ],
+      "id": "e8275e15-a623-4891-97fd-a2dfcdd00d08",
+      "name": "who_are_you",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Разовые задачи (подстраиваются под один день или диапазон дат)\nSELECT \n    'schedule_item' as source, id, item_type, title, description, time_start, time_end, event_date::TEXT as date_or_day\nFROM schedule \nWHERE user_id = {{ $json.user_id }} \n  AND (\n    ( {{ $json.interval_days }} = 0 AND event_date = '{{ $json.target_date }}' )\n    OR \n    ( {{ $json.interval_days }} > 0 AND event_date BETWEEN '{{ $json.target_date }}' AND '{{ $json.target_date }}'::DATE + CAST({{ $json.interval_days }} || ' days' AS INTERVAL) )\n  )\n\nUNION ALL\n\n-- 2. Постоянное расписание (выбирает только если строка дней недели не равна '0')\nSELECT \n    'regular_item' as source, id, item_type, title, description, time_start, time_end,\n    CASE day_of_week WHEN 1 THEN 'Пн' WHEN 2 THEN 'Вт' WHEN 3 THEN 'Ср' WHEN 4 THEN 'Чт' WHEN 5 THEN 'Пт' WHEN 6 THEN 'Сб' WHEN 7 THEN 'Вс' END as date_or_day\nFROM regular_schedule \nWHERE user_id = {{ $json.user_id }} \n  AND '{{ $json.days_of_week_str }}' != '0'\n  AND day_of_week IN ({{ $json.days_of_week_str }})\n\nUNION ALL\n\n-- 3. Глобальные цели (вытаскиваем существующие цели, чтобы ИИ видел их при создании новой)\nSELECT \n    'goal_item' as source, id, period_type as item_type, text_content as title, NULL as description, NULL as time_start, NULL as time_end, period_value as date_or_day\nFROM goals \nWHERE user_id = {{ $json.user_id }};\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2368,
+        -240
+      ],
+      "id": "fad370a6-1d62-4bd1-95c3-8d7c7917926e",
+      "name": "get_info",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "/today",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "b207cd82-9249-421b-bb19-5502a6805c7c"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "today"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "3645d182-0808-4f80-a928-1f240e42eadd",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "/week",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "week"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "594845a3-3aa5-49ef-8d48-93505d52ba4d",
+                    "leftValue": "={{ $json.message.text }}",
+                    "rightValue": "/goals",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "goals"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "a320439a-3dc0-4a7b-b79e-be4509ed03d4",
+                    "leftValue": "={{ $json.message.text != \"/today\" && $json.message.text != \"/week\" && $json.message.text != \"/goals\"}}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "random"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1120,
+        480
+      ],
+      "id": "32def20a-2a56-45fc-b59e-7a8047b817b2",
+      "name": "command",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, content \nFROM (\n    SELECT role, content, created_at\n    FROM ai_chat_history\n    WHERE user_id = {{ $('Telegram Trigger').item.json.message.chat.id }}\n    ORDER BY created_at DESC\n    LIMIT 5\n) sub\nORDER BY created_at ASC;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1328,
+        -240
+      ],
+      "id": "2584747e-6343-4523-8fb0-0952420bf374",
+      "name": "get_chat_history",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO regular_schedule (user_id, day_of_week, time_start, time_end, item_type, title, description)\nVALUES (\n    {{ $('Telegram Trigger').item.json.message.chat.id }},\n    {{ $('Code').item.json.action_data.day_of_week }},\n    '{{ $('Code').item.json.action_data.time_start }}',\n    {{ $('Code').item.json.action_data.time_end ? \"'\" + $('Code').item.json.action_data.time_end + \"'\" : 'NULL' }},\n    '{{ $('Code').item.json.action_data.item_type }}',\n    '{{ $('Code').item.json.action_data.title }}',\n    {{ $('Code').item.json.action_data.description ? \"'\" + $('Code').item.json.action_data.description + \"'\" : 'NULL' }}\n);\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        864
+      ],
+      "id": "e364a57b-4896-46aa-9430-2853a972da40",
+      "name": "create_regular",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE schedule \nSET \n    title = COALESCE(\n        (sub.data_json ->> 'title'), \n        title\n    ),\n    time_start = COALESCE(\n        (sub.data_json ->> 'time_start')::TIME, \n        time_start\n    ),\n    time_end = CASE \n        WHEN (sub.data_json ->> 'time_end') = 'clear' THEN NULL\n        ELSE COALESCE(\n            (sub.data_json ->> 'time_end')::TIME, \n            time_end\n        )\n    END,\n    description = COALESCE(\n        (sub.data_json ->> 'description'), \n        description\n    ),\n    is_important = COALESCE(\n        (sub.data_json ->> 'is_important')::BOOLEAN, \n        is_important\n    )\nFROM (\n    SELECT \n        {{ $('Code').item.json.action_data.id }}::INT AS target_id,\n        {{ $('Telegram Trigger').item.json.message.chat.id }}::BIGINT AS target_user,\n        '{{ JSON.stringify($('Code').item.json.action_data.patch_data) }}'::JSONB AS data_json\n) sub\nWHERE schedule.id = sub.target_id \n  AND schedule.user_id = sub.target_user;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        704
+      ],
+      "id": "7092d8b3-edb6-496a-84f8-71fb085c6003",
+      "name": "update_schedule",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM schedule \nWHERE id = {{ $('Code').item.json.action_data.id }} \n  AND user_id = {{ $('Telegram Trigger').item.json.message.chat.id }};\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        1344
+      ],
+      "id": "bd4c964d-6b6e-4089-a5e5-1c1dc3dfef50",
+      "name": "delete_schedule",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Принудительно вытягиваем ID чата из самого старта\nconst userId = $('Telegram Trigger').item.json.message.chat.id;\n\n// 2. БЕЗОПАСНО забираем экшен и сообщение от ИИ, используя .first() вместо .item\nlet actionType = \"\";\nlet aiMessage = \"\";\n\ntry {\n  // .first() гарантирует, что n8n возьмет первый доступный элемент ноды без ошибки Multiple Matches\n  const aiNodeData = $('Code').first().json;\n  actionType = aiNodeData?.action_data?.action || \"\";\n  aiMessage = aiNodeData?.text || \"\";\n} catch (e) {\n  console.log(\"Ветка ИИ не найдена или пуста:\", e);\n}\n\n// 3. Получаем данные от предыдущей ноды базы данных в текущей итерации\nconst lastNodeResult = $input.first().json;\n\n// 4. Перехватываем системные ошибки базы данных\nif (lastNodeResult.error || lastNodeResult.success === false) {\n  return {\n    json: {\n      chat_id: userId,\n      is_ai: true,\n      text: \"❌ *Ошибка базы данных:*\\nНе удалось выполнить операцию. Проверьте корректность данных или попробуйте позже.\"\n    }\n  };\n}\n\n// 5. Запасной фоллбэк сообщений\nlet fallbackMessage = \"✅ Изменения успешно внесены в вашу базу данных!\";\nif (actionType === 'create_schedule') fallbackMessage = \"✅ Задача успешно добавлена в ваше расписание!\";\nif (actionType === 'create_goal') fallbackMessage = \"🎯 Новая глобальная цель успешно зафиксирована!\";\nif (actionType === 'delete_schedule') fallbackMessage = \"🗑️ Задача была успешно удалена из вашего расписания.\";\nif (actionType === 'replace_regular_for_day') fallbackMessage = \"🔄 Регулярное событие успешно заменено на разовую задачу на выбранный день.\";\n\nreturn {\n  json: {\n    chat_id: userId,\n    is_ai: true,\n    text: aiMessage || fallbackMessage\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        864
+      ],
+      "id": "5ebea3f1-ef58-440f-87dc-b0bd275d91c5",
+      "name": "DB_handler"
+    },
+    {
+      "parameters": {
+        "jsCode": "const userId = $('Telegram Trigger').item.json.message.chat.id;\nconst incomingData = $input.first().json;\n\n// 1. Автоматически определяем, нужно ли логировать этот запрос в историю ИИ.\n// Если запрос пришел с нод форматирования команд (/today, /week, /goals), \n// у них в выражении n8n НЕТ родительской ноды \"Code\" (Экстрактора JSON). \n// Проверяем это системным методом n8n:\nlet shouldLogHistory = false;\ntry {\n  // Если нода экстрактора JSON была активна в этой ветке, значит это был запрос к ИИ\n  const aiExtractorNode = $('Code').item;\n  if (aiExtractorNode) {\n    shouldLogHistory = true;\n  }\n} catch (e) {\n  // Если вылетела ошибка — значит ветка ИИ не выполнялась, это была прямая команда\n  shouldLogHistory = false;\n}\n\n// 2. Унифицируем текст сообщения\nconst finalPositionText = incomingData.text || incomingData.user_message || \"Готово!\";\n\nreturn {\n  json: {\n    // Чистые данные, которые заберет нода Telegram\n    chat_id: userId,\n    text: finalPositionText,\n    \n    // Технические данные скрытого транзита (Telegram их проигнорирует, но логгер увидит)\n    is_ai_branch: shouldLogHistory,\n    raw_user_request: $('Telegram Trigger').item.json.message.text || $('HTTP Request').item.json.text || \"\"\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        0
+      ],
+      "id": "aa35fa74-7db9-48c2-81fe-496eb51f0753",
+      "name": "final_collector"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Ты — ИИ-модуль предобработки текста для умного планировщика. Твоя задача — очистить текст от шума Whisper, исправить опечатки, проанализировать историю диалога и подготовить точные параметры для SQL-запроса к базе данных.\n\nСегодняшняя дата: {{ new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Moscow' }) }}\nТекущий день недели: {{ new Date().toLocaleDateString('ru-RU', { weekday: 'long', timeZone: 'Europe/Moscow' }) }}\n\nХРОНОЛОГИЯ ПОСЛЕДНИХ СООБЩЕНИЙ ДИАЛОГА:\n{{ $('who_are_you').item.json.is_move_mode ? 'История отключена (прямой перенос задачи).' : JSON.stringify($('get_chat_history').all().map(el => ({ role: el.json.role, text: el.json.content }))) }}\n\n\nЗапрос юзера: {{ $('who_are_you').item.json.user_raw_text }}\nПроанализируй запрос пользователя и верни СТРОГО JSON со следующими полями:\n1. \"clean_user_text\": Исправленный и дополненный на основе истории текст запроса и его айди и время (айди и время по-возможности, если явно указано). (Например, если пользователь сказал \"отмени её\", а в истории последней была задача \"Тренировка на 16:00\", clean_user_text должен быть: \"Удали задачу Тренировка 16:00\"). \n2. \"intent\": Варианты: \"create\", \"update\", \"delete\", \"view\", \"unknown\".\n3. \"target_date\": Точная дата в формате YYYY-MM-DD. Если даты нет — верни сегодняшнюю.\n4. \"sql_days_of_week\": Массив чисел (ISO дни недели от 1 до 7).\n5. \"is_range\": true или false.\n6. \"range_days_interval\": Число дней для интервала выборки.\n\nТвой ответ должен содержать СТРОГО валидный JSON-блок, обернутый в теги ```json ... ```. Никакого другого лишнего текста.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1792,
+        -240
+      ],
+      "id": "171476c0-7d0c-4f39-b860-d33cd49e551e",
+      "name": "AI_filter",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Забираем чистый текст ответа из нативной ноды AI_filter\nconst aiText = $input.first().json.output || \"\";\nconst userId = $('Telegram Trigger').item.json.message.chat.id;\n\nlet parsed = {\n  clean_user_text: \"Обновление планов\",\n  intent: \"unknown\",\n  target_date: new Date().toISOString().split('T')[0],\n  sql_days_of_week: [new Date().getDay() === 0 ? 7 : new Date().getDay()],\n  range_days_interval: 0\n};\n\n// 2. Ищем и вырезаем JSON-паспорт, сгенерированный моделью\nconst jsonRegex = /```json\\s*([\\s\\(\\S\\)]*?)\\s*```/;\nconst match = aiText.match(jsonRegex);\n\nif (match && match[1]) {\n  try {\n    parsed = JSON.parse(match[1].trim());\n  } catch (e) {\n    console.error(\"Ошибка парсинга JSON-паспорта:\", e);\n  }\n}\n\n// 3. Вычищаем технический JSON из текста, чтобы остался только чистый clean_text\nconst cleanText = aiText.replace(jsonRegex, \"\").trim();\n\n// return {\n//   json: {\n//     user_id: userId,\n//     clean_text: parsed.clean_user_text || cleanText,\n//     intent: parsed.intent,\n//     target_date: parsed.target_date,\n//     // Превращаем массив дней недели в строку для SQL условий (например, \"2\" или \"1,2,3\")\n//     days_of_week_str: Array.isArray(parsed.sql_days_of_week) ? parsed.sql_days_of_week.join(',') : String(parsed.sql_days_of_week),\n//     interval_days: parsed.range_days_interval || 0\n//   }\n// };\n\n// Формируем безопасную строку для SQL-условия IN\nlet daysStr = \"0\"; // Дефолтное значение, если массив пустой\nif (parsed.sql_days_of_week && parsed.sql_days_of_week.length > 0) {\n  daysStr = Array.isArray(parsed.sql_days_of_week) ? parsed.sql_days_of_week.join(',') : String(parsed.sql_days_of_week);\n}\n\nreturn {\n  json: {\n    user_id: userId,\n    clean_text: parsed.clean_user_text || cleanText,\n    intent: parsed.intent,\n    target_date: parsed.target_date,\n    days_of_week_str: daysStr, // Теперь тут гарантированно либо \"2\", либо \"0\", но не пустота!\n    interval_days: parsed.range_days_interval || 0\n  }\n};\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2144,
+        -240
+      ],
+      "id": "06ca32c3-10cc-4bbd-9b97-9450fcd2d5e4",
+      "name": "code_filter"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "=openai/gpt-oss-120b",
+          "mode": "id"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1792,
+        -80
+      ],
+      "id": "fb396cb3-40fd-47f6-afe9-ee3a3d599d68",
+      "name": "free_model",
+      "credentials": {
+        "openAiApi": {
+          "id": "JC6oxixDMabESURk",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "=openai/gpt-oss-120b",
+          "mode": "id"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2640,
+        176
+      ],
+      "id": "7447b135-f46e-478e-ab1f-f2fc86fd531f",
+      "name": "exp_model",
+      "credentials": {
+        "openAiApi": {
+          "id": "JC6oxixDMabESURk",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Настройки режима: \"Run Once for All Items\"\n\n// 1. Из входных данных ('Send a text message') забираем ID чата/пользователя\nconst userId = $input.item.json.result.chat.id;\n\n// 2. Текст ответа ассистента (то, что бот только что успешно отправил в Telegram)\nconst assistantResponse = $input.item.json.result.text;\n\n// 3. Пытаемся вытащить исходное сообщение пользователя. \n// В n8n внутри объекта ответа Telegram часто лежит копия исходного текста (если это был reply), \n// но надежнее всего забрать его через универсальный метод n8n по типу входных данных:\nconst userMessage = $('Telegram Trigger').item.json.message.text || \"Текст пользователя\";\n\n// 4. Текущий режим (хардкодим 1, если нет связи с бД, либо берем из сессии)\nconst currentMode = 1; \n\n// Возвращаем массив из двух объектов для пакетного INSERT\nreturn [\n  {\n    json: {\n      user_id: Number(userId),\n      role: 'user',\n      content: userMessage,\n      mode_context: Number(currentMode)\n    }\n  },\n  {\n    json: {\n      user_id: Number(userId),\n      role: 'assistant',\n      content: assistantResponse,\n      mode_context: Number(currentMode)\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        0
+      ],
+      "id": "2f7f2801-36aa-4c31-9d13-a1a705e5d619",
+      "name": "format_history"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE regular_schedule \nSET \n    day_of_week = COALESCE(\n        (sub.data_json ->> 'day_of_week')::INT, \n        day_of_week\n    ),\n    time_start = COALESCE(\n        (sub.data_json ->> 'time_start')::TIME, \n        time_start\n    ),\n    time_end = CASE \n        WHEN (sub.data_json ->> 'time_end') = 'clear' THEN NULL\n        ELSE COALESCE(\n            (sub.data_json ->> 'time_end')::TIME, \n            time_end\n        )\n    END,\n    item_type = COALESCE(\n        (sub.data_json ->> 'item_type'), \n        item_type\n    ),\n    title = COALESCE(\n        (sub.data_json ->> 'title'), \n        title\n    ),\n    description = COALESCE(\n        (sub.data_json ->> 'description'), \n        description\n    )\nFROM (\n    SELECT \n        {{ $('Code').item.json.action_data.id }}::INT AS target_id,\n        {{ $('Telegram Trigger').item.json.message.chat.id }}::BIGINT AS target_user,\n        '{{ JSON.stringify($('Code').item.json.action_data.patch_data) }}'::JSONB AS data_json\n) sub\nWHERE regular_schedule.id = sub.target_id \n  AND regular_schedule.user_id = sub.target_user;\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        1040
+      ],
+      "id": "0caa8385-08c8-4f30-a4de-cf5b03ef62b8",
+      "name": "update_regular",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO schedule (user_id, event_date, time_start, time_end, item_type, title, description)\nVALUES (\n    {{ $('Telegram Trigger').item.json.message.chat.id }}::BIGINT,\n    '{{ $('Code').item.json.action_data.target_date }}'::DATE,\n    NULLIF('{{ $('Code').item.json.action_data.create_data.time_start }}', '')::TIME,\n    NULLIF('{{ $('Code').item.json.action_data.create_data.time_end }}', '')::TIME,\n    '{{ $('Code').item.json.action_data.create_data.item_type }}',\n    '{{ $('Code').item.json.action_data.create_data.title }}',\n    CONCAT(\n        '{{ $('Code').item.json.action_data.create_data.description }}', \n        ' [skip_regular_id:', {{ $('Code').item.json.action_data.delete_id }}::INT, ']'\n    )\n);\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3248,
+        1200
+      ],
+      "id": "a64049b6-5b8c-4ce2-93f4-8e9ac222f823",
+      "name": "replace_regular_for_day",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "6RP0X2qNyFcVKkJ9",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/6RP0X2qNyFcVKkJ9",
+          "cachedResultName": "daily_briefing"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        176,
+        -208
+      ],
+      "id": "f9cec222-fda5-4104-9e95-55695c40bf28",
+      "name": "Call 'daily_briefing'"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Настройка: Run Once for All Items\nconst item = $input.item.json;\n\n// Забираем режим и ID задачи из ноды сессии (подставь точное имя твоей ноды БД, например 'Get or update user')\nconst session = $('who_are_you').item.json; \n\nlet finalRawText = item.user_raw_text;\nlet isMoveMode = false;\n\n// Если юзер нажал кнопку \"Перенос\" в вечернем брифинге (current_mode === 2)\nif (Number(session.current_mode) === 2 && session.moved_task_id) {\n    isMoveMode = true;\n    finalRawText = `[СИСТЕМНЫЙ КОНТЕКСТ: Пользователь отвечает на запрос переноса задачи с ID ${session.moved_task_id} из вечернего опроса. Обязательно обнови дату/время именно для задачи ID ${session.moved_task_id} через update_schedule]. Ответ пользователя: ${finalRawText}`;\n}\n\nreturn [{\n    json: {\n        ...item,\n        user_raw_text: finalRawText,\n        is_move_mode: isMoveMode,\n        moved_task_id: session.moved_task_id || null\n    }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        16
+      ],
+      "id": "35bc3adc-1d5b-474f-bf04-09e5343692f8",
+      "name": "inject_move_context"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH reset_sess AS (\n    UPDATE user_session \n    SET current_mode = 1, pending_task_id = NULL \n    WHERE user_id = {{ $('Telegram Trigger').item.json.message.chat.id }}\n)\nUPDATE schedule \nSET is_reviewed_today = TRUE \nWHERE id = {{ $('inject_move_context').item.json.moved_task_id }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4624,
+        -160
+      ],
+      "id": "3dc8ccfd-18a5-4b73-8b06-3ee2fdc9a617",
+      "name": "reset_mode",
+      "credentials": {
+        "postgres": {
+          "id": "L75PQIkVeVpKDcKr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n    json: {\n        action: 'resume_wizard',\n        chat_id: $('Telegram Trigger').item.json.message.chat.id\n    }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4848,
+        -160
+      ],
+      "id": "9415870f-14bf-4ec9-aa0c-833e3c69f15d",
+      "name": "prepare_resume"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "6RP0X2qNyFcVKkJ9",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/6RP0X2qNyFcVKkJ9",
+          "cachedResultName": "daily_briefing"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        5072,
+        -160
+      ],
+      "id": "892acf70-ede9-4221-b50c-0f4099a8ef68",
+      "name": "Call 'daily_briefing'1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.current_mode }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    },
+                    "id": "c7479471-bd26-483d-90b8-03b87cb46d3b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "exist_user"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "8bea336e-a73d-4e1a-81d1-78ee68f77368",
+                    "leftValue": "={{ $json.current_mode }}",
+                    "rightValue": 0,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "not_exist_user"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "b87f0da6-fe18-42e4-ba45-2c68a1ce367d",
+                    "leftValue": "={{ $json.current_mode }}",
+                    "rightValue": 2,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "exist_user_is_moving_task"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1904,
+        0
+      ],
+      "id": "642d187e-357b-477f-8c7b-a50cc969badd",
+      "name": "mods"
+    },
+    {
+      "parameters": {
+        "content": "# This is main workflow",
+        "height": 80,
+        "width": 400
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1408,
+        -720
+      ],
+      "typeVersion": 1,
+      "id": "5cf959ee-aa3e-445d-984e-8e34f2c5865f",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "### getting msg and speech to txt",
+        "height": 80,
+        "width": 150,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        656,
+        64
+      ],
+      "typeVersion": 1,
+      "id": "b61dfe79-b7d4-4ae3-b0fd-799e901b307d",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "### text is command?",
+        "height": 80,
+        "width": 150,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1088,
+        352
+      ],
+      "typeVersion": 1,
+      "id": "fa99836c-bcd2-4ccb-b50c-f29604d66f7a",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "### getting info about user and his session",
+        "height": 80,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1088,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "49c29831-5197-47be-b3b7-458c407b6f26",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "cda0f47c-43f6-4813-9d24-0b138573841d",
+                    "leftValue": "={{ $json.callback_query ? 'callback' : 'message' }}",
+                    "rightValue": "callback",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "callback"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.callback_query ? 'callback' : 'message' }}",
+                    "rightValue": "message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "649eaeb9-e017-41e1-8caa-3affd68c28b1"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "message"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        -288,
+        -16
+      ],
+      "id": "b7c51dbb-1a72-492d-8187-8e68ee3b5337",
+      "name": "is_callback"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.message.voice ? 'voice' : 'text' }}",
+                    "rightValue": "voice",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "f1bfc62a-9734-483d-ae6c-51f32d984554"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "voice"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "db501823-8ac9-4a17-94ec-4146316fb515",
+                    "leftValue": "={{ $json.message.voice ? 'voice' : 'text' }}",
+                    "rightValue": "text",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "06ba5f7b-a44f-4f0c-8f2c-580a1e6bb76f",
+      "name": "voice_or_text"
+    },
+    {
+      "parameters": {
+        "content": "if msg is callback - switch to sub workflow ",
+        "height": 80,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -352,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "d084a428-2294-448e-989a-efcb1b6a1f75",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "### if user is existing - turn on first cheap model to analyze schedule. Take days and tasks from DB. AI_filter writes the instruction for the expensive model.",
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1792,
+        -432
+      ],
+      "typeVersion": 1,
+      "id": "f29f582c-28e0-4616-842b-7b809766a78a",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "### expensive model writes json with instructions for actions",
+        "height": 80,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2624,
+        -96
+      ],
+      "typeVersion": 1,
+      "id": "71ec3e1c-cf98-4ad4-8115-078e7ace07fa",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "filtration ai json",
+        "height": 80,
+        "width": 150,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2128,
+        -336
+      ],
+      "typeVersion": 1,
+      "id": "e8e5c844-f094-4069-9712-5bffef4f6f72",
+      "name": "Sticky Note7"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Забираем ответ из структуры ИИ\nconst aiText = $input.first().json.output || $input.first().json.text || \"\";\nconst userId = $('Telegram Trigger').item.json.message.chat.id;\n\nlet extractedJson = [];\n\n// Глобальное регулярное выражение с флагами 'g' (глобальный) и 's' (включая переносы строк)\nconst jsonRegex = /```json\\s*([\\s\\(\\S\\)]*?)\\s*```/gs;\nlet match;\n\n// Находим абсолютно все блоки ```json ... ``` в ответе ИИ\nwhile ((match = jsonRegex.exec(aiText)) !== null) {\n  try {\n    const rawJson = JSON.parse(match[1].trim());\n    \n    // Если внутри блока массив — распаковываем его, если объект — просто пушим\n    if (Array.isArray(rawJson)) {\n      extractedJson.push(...rawJson);\n    } else {\n      extractedJson.push(rawJson);\n    }\n  } catch (e) {\n    console.error(\"Ошибка парсинга одного из блоков JSON от ИИ:\", e);\n  }\n}\n\n// Вычищаем все технические JSON-блоки из сообщения для пользователя\nconst cleanText = aiText.replace(jsonRegex, \"\").trim();\n\n// Защитная проверка: авто-замена дефисов во времени на двоеточия\nfor (let action of extractedJson) {\n  if (action.time_start && typeof action.time_start === 'string') {\n    action.time_start = action.time_start.replace('-', ':');\n  }\n  if (action.time_end && typeof action.time_end === 'string') {\n    action.time_end = action.time_end.replace('-', ':');\n  }\n}\n\n// ЕСЛИ ЭКШЕНОВ НЕТ (Пользователь просто общается)\nif (extractedJson.length === 0) {\n  return [{\n    json: {\n      text: cleanText || \"Готово!\",\n      chat_id: userId,\n      has_action: false,\n      action_data: null,\n      is_ai: true\n    }\n  }];\n}\n\n// ЕСЛИ ЭКШЕНЫ ЕСТЬ: возвращаем массив элементов для запуска цикла n8n\nreturn extractedJson.map(action => {\n  return {\n    json: {\n      text: cleanText || \"Планы обновлены! 👍\",\n      chat_id: userId,\n      has_action: true,\n      action_data: action\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        16
+      ],
+      "id": "39790205-0477-4c1d-b7c7-9a9771149b0f",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "content": "filtration ai json",
+        "height": 80,
+        "width": 150,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2928,
+        -80
+      ],
+      "typeVersion": 1,
+      "id": "e8e315ca-a1f1-4874-a8ed-86fd25e97d74",
+      "name": "Sticky Note8"
+    },
+    {
+      "parameters": {
+        "content": "## actions block",
+        "height": 80,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2816,
+        496
+      ],
+      "typeVersion": 1,
+      "id": "1be19d20-555b-48ec-a51e-cb1f4d3a3d7f",
+      "name": "Sticky Note9"
+    },
+    {
+      "parameters": {
+        "content": "### send answer",
+        "height": 80,
+        "width": 150,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        3760,
+        -128
+      ],
+      "typeVersion": 1,
+      "id": "0a565801-2636-4b3b-8f24-8466ca6a0645",
+      "name": "Sticky Note10"
+    },
+    {
+      "parameters": {
+        "content": "### history logging",
+        "height": 80,
+        "width": 160,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        4144,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "c792ddea-a07c-4821-951c-6fe67a8d57f6",
+      "name": "Sticky Note11"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('inject_move_context').isExecuted && Boolean($('inject_move_context').item.json.is_move_mode) }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "95ee4252-b324-48ee-a4c7-e08a1b5dbaa3"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        4400,
+        0
+      ],
+      "id": "b362232f-3431-4451-aa65-e64d9de254b5",
+      "name": "briefing_or_no"
+    },
+    {
+      "parameters": {
+        "content": "### if user session has current_mode is 2 (user moving task) - switch to sub workflow ",
+        "height": 112,
+        "width": 208,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        4560,
+        -304
+      ],
+      "typeVersion": 1,
+      "id": "f92821eb-28b2-463f-8ae3-f6dc4fc5f7c3",
+      "name": "Sticky Note12"
+    },
+    {
+      "parameters": {
+        "content": "## if you wanna add the function \"daily_briefing\" to the project we created 'bridges' to call sub workflow: \nuser mode check (current_mode)\nfinal check for moving task",
+        "height": 240,
+        "width": 304,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        80,
+        208
+      ],
+      "typeVersion": 1,
+      "id": "148b1f51-68e7-4952-bf64-716a8d8907e6",
+      "name": "Sticky Note13"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "is_callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a file": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "who_are_you",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create_schedule": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Create_goals": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_today": {
+      "main": [
+        [
+          {
+            "node": "format_today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_week": {
+      "main": [
+        [
+          {
+            "node": "format_week",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_goals": {
+      "main": [
+        [
+          {
+            "node": "format_goals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format_week": {
+      "main": [
+        [
+          {
+            "node": "final_collector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format_today": {
+      "main": [
+        [
+          {
+            "node": "final_collector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format_goals": {
+      "main": [
+        [
+          {
+            "node": "final_collector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "action_or_text": {
+      "main": [
+        [
+          {
+            "node": "final_collector",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "action_type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "action_type": {
+      "main": [
+        [
+          {
+            "node": "Create_schedule",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create_goals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "update_schedule",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "create_regular",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "update_regular",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "replace_regular_for_day",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "delete_schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "format_history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "who_are_you": {
+      "main": [
+        [
+          {
+            "node": "inject_move_context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_info": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "command": {
+      "main": [
+        [
+          {
+            "node": "get_today",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "get_week",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "get_goals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "who_are_you",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "log_history": {
+      "main": [
+        [
+          {
+            "node": "briefing_or_no",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_chat_history": {
+      "main": [
+        [
+          {
+            "node": "AI_filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB_handler": {
+      "main": [
+        [
+          {
+            "node": "final_collector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_schedule": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_regular": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "delete_schedule": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "final_collector": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI_filter": {
+      "main": [
+        [
+          {
+            "node": "code_filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "code_filter": {
+      "main": [
+        [
+          {
+            "node": "get_info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "free_model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI_filter",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "exp_model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format_history": {
+      "main": [
+        [
+          {
+            "node": "log_history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update_regular": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "replace_regular_for_day": {
+      "main": [
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB_handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "inject_move_context": {
+      "main": [
+        [
+          {
+            "node": "mods",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reset_mode": {
+      "main": [
+        [
+          {
+            "node": "prepare_resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare_resume": {
+      "main": [
+        [
+          {
+            "node": "Call 'daily_briefing'1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mods": {
+      "main": [
+        [
+          {
+            "node": "get_chat_history",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI_filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is_callback": {
+      "main": [
+        [
+          {
+            "node": "Call 'daily_briefing'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "voice_or_text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "voice_or_text": {
+      "main": [
+        [
+          {
+            "node": "Get a file",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "action_or_text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "briefing_or_no": {
+      "main": [
+        [
+          {
+            "node": "reset_mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0d24cb14-d23d-4541-9f25-444179d7883a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c8ddc6f1a9e600f29aea545a450e49fc53187a21f6c55612ca9983426a7b9838"
+  },
+  "nodeGroups": [],
+  "id": "uxvu5i7qnfzmaRT7",
+  "tags": []
+}
